@@ -1,3 +1,328 @@
+commit dceccd1876763686ea96cd9f65121e4d7dfff109
+Merge: 873268d a560dfe
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Mon Sep 7 01:04:25 2026 -0400
+
+    Merge remote-tracking branch 'refs/remotes/ArrayBolt3/arraybolt3/trixie'
+
+commit a560dfe9e4d3654863a46301db30cb01ed125562
+Author: Aaron Rainbolt <arraybolt3@gmail.com>
+Date:   Sun Sep 6 01:15:17 2026 -0400
+
+    Remove obsolete pre-push CI file
+
+commit 873268df8123c455bd325a4c3d7891ad08167246
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Tue Aug 25 03:27:48 2026 +0000
+
+    bumped changelog version
+
+commit befee8d06008931a4716f09bbb47cbc4b551c598
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Mon Aug 24 02:29:56 2026 -0400
+
+    repurpose package
+
+commit 753b6dc3fdc078bac90458ffd5d3b6b4f834c4a8
+Merge: 758f7a4 e0ce2fa
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Mon Aug 24 02:21:39 2026 -0400
+
+    Merge remote-tracking branch 'refs/remotes/org-ai-assisted/ai'
+
+commit e0ce2fae9da7a9d40002238287c3abe22cc60ae5
+Author: claude (dev182 e09ec5cf-4ebf-4e1b-88e5-55fbac6ef1d3) <noreply@anthropic.com>
+Date:   Mon Aug 10 14:31:24 2026 -0400
+
+    sandbox-app-launcher: propagate the app exit status without tripping the ERR trap
+
+    run_program returns the wrapper status, but the call site ran under errexit +
+    the error_handler ERR trap, so any non-zero app status fired a spurious "BUG"
+    and exit 1 instead of propagating. Guard the call with '|| exit "$?"'.
+
+    Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+commit 02393434b74bcae564bcd30a2fcf966d25bb62f3
+Author: claude (dev182 e09ec5cf-4ebf-4e1b-88e5-55fbac6ef1d3) <noreply@anthropic.com>
+Date:   Mon Aug 10 13:56:45 2026 -0400
+
+    run_program: run cleanup and propagate the wrapper exit status
+
+    Under errexit and the ERR trap a non-zero bwrap-wrapper aborted
+    run_program before kill_processes_inside_sandbox, leaking the sandbox's
+    processes and swallowing the failure. Capture the wrapper status without
+    tripping errexit, always run cleanup, then return that status.
+
+    Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+commit 5dd84fafd1245cfbea72cb0d3ffad32a38d6a10f
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Sat Aug 8 04:55:59 2026 -0400
+
+    CI: enrol in the pre-push static gate
+
+    This repo had no GitHub Actions workflow at all, so nothing verified its PRs on
+    the server side -- the only gate was ci-repro run locally.
+
+    The workflow file is the canonical consumer template, copied verbatim from
+    developer-meta-files/consumer-templates/.github/workflows/. It is managed: once
+    present, dm-packaging-helper-script's pkg_update_consumer_workflows keeps it in
+    sync, so it must not be hand-edited here.
+
+    Enrolment is deliberately a SEPARATE act from propagation: that function uses
+    pkg_update_if_exists, which only updates a workflow that already exists, and
+    pkg_install_dependabot_yml skips any repo with no .github/workflows/ directory.
+    Neither creates the first one. Hence this commit.
+
+    Scope: the repos this session actually changed and that ship shell code -- not
+    every repo lacking CI. Enrolling a repo consumes shared org-wide Actions
+    concurrency (20 jobs, the real limit; public repos are not minute-billed), so it
+    is worth spending where there is signal.
+
+    Verified BEFORE enrolling: 'ci-repro.sh --worktree' passes for this repo, so the
+    gate arrives green rather than turning someone's PR red on arrival.
+
+    NOTE, so it is not a surprise: creating .github/workflows/ makes this repo
+    eligible for the canonical .github/dependabot.yml on the next propagation pass,
+    which pkg_install_dependabot_yml installs into any repo that uses Actions.
+
+commit e718567effbc9daa029efd0cd032b90d6defa431
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Fri Aug 7 14:28:58 2026 -0400
+
+    sandbox-app-launcher: four strict-mode regressions from the R-010 pass
+
+    All four were introduced by the strict-mode conversion itself. codex, coderabbit
+    and agy each found a subset independently; the dispatch one was found by all
+    three.
+
+    1. 'remove' and 'list' aborted (usr/bin/sandbox-app-launcher)
+    ---------------------------------------------------------------
+
+    The dispatch chain at the bottom tests setup_sandbox, then start_program, then
+    remove -- but each case arm assigns only its OWN variable. An earlier commit
+    initialised setup_sandbox and sal_is_run_with_root and stopped there, so any
+    subcommand still reached a test for a variable its arm never set: 'remove' and
+    'list' aborted on start_program.
+
+    That is the same class of gap as the original bug, left half-fixed. All four
+    dispatch variables are initialised now.
+
+    2. Any app with no config file aborted (usr/bin/sandbox-app-launcher)
+    ----------------------------------------------------------------------
+
+    allow_dynamic_native_code_exec, allow_mic, allow_net, allow_webcam and
+    shared_storage all come from the OPTIONAL per-app .conf and are read
+    unconditionally afterwards. An app with no config, or a partial one, aborted.
+
+    They are defaulted empty before the source. Empty is both what they expanded to
+    before strict mode and the safe answer: each is compared against "yes", so empty
+    selects the restrictive branch.
+
+    3. Third-party Xsession.d scripts killed the launcher (wrapper-script)
+    ------------------------------------------------------------------------
+
+    'source "${file_name}" || true' does NOT protect against nounset. An unbound
+    variable under 'set -u' terminates the SHELL -- it is not a command failure, so
+    it never reaches the '||'.
+
+    These are third-party scripts that expand variables routinely absent from the
+    sanitized environment sudo hands us; Debian ships
+    /etc/X11/Xsession.d/20qt-gnome-desktop-session-id, which reads
+    $GNOME_DESKTOP_SESSION_ID directly. On any system carrying such a script the
+    application never launched at all.
+
+    nounset is now off across both sourcing loops and restored after. The '|| true'
+    stays, separately, for a non-zero RETURN.
+
+    4. Account lookups misread under pipefail (usr/bin/sandbox-app-launcher)
+    -------------------------------------------------------------------------
+
+    'getent passwd | sed | grep -qw' and 'getent passwd | grep -q': grep -q exits at
+    the first match and closes the pipe, so getent or sed takes SIGPIPE and pipefail
+    reports the pipeline failed DESPITE the match. setup_or_check then tried to
+    recreate an existing user, and remove_app SKIPPED the deletion.
+
+    Both are exact lookups now -- 'getent passwd "${app_user}"' -- which also stops
+    a substring match on an unrelated account.
+
+    Testing
+    -------
+
+    Gate exit 0 in an ISOLATED checkout.
+
+    Differential old vs new across every subcommand, bwrap-isolated:
+
+      7 same, 0 differing
+
+      setup / start / remove / list / no arguments, each with a config present, plus
+      start and remove with NO config file.
+
+    Canaries: removing the start_program and remove initialisation fails exactly the
+    two 'remove' cases; removing the config defaults fails exactly the two 'NO
+    config file' cases. Both as nounset aborts.
+
+    Two harness defects fixed to get there, both of the same shape -- agreement
+    between two runs that never reached the code:
+    - the stub config was mounted at a path that does not exist under a read-only
+      /etc, so bwrap failed before exec; /etc is tmpfs'd and the files the script
+      actually reads are bound back.
+    - 'testapp' was not in $PATH, so all seven cases died at "Could not find" long
+      before the dispatch chain, and the canary did NOT bite. A stub executable is
+      installed now, and a "Could not find" in the output fails the case outright.
+
+commit e30d847693ae4191defa4aac6b0ed3df6db53461
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Fri Aug 7 11:51:00 2026 -0400
+
+    sandbox-app-launcher: fix three defects an external review found
+
+    An ai-review pass over this branch found three real problems, all introduced by
+    this pass. Two came from applying 'shellcheck -f diff' WHOLESALE, which quoted
+    expansions whose word splitting is the mechanism.
+
+    1. QUOTING bwrap_args BROKE EVERY SANDBOXED LAUNCH
+    ---------------------------------------------------
+
+    bwrap_args holds a space-separated string of SEPARATE bwrap arguments, built by
+    sandbox-app-launcher and passed through the environment. Quoted, bwrap receives
+    the whole string as ONE argument and rejects it. The file's own
+    'XXX: bwrap_args does not have proper whitespace support' note is about exactly
+    this. Unquoted again, with the reason stated.
+
+    2. QUOTING THE PID LIST BROKE THE WAIT LOOP
+    --------------------------------------------
+
+    pgrep emits a NEWLINE-separated list and 'ps -p' wants separate words. Quoted,
+    ps rejects the string, the '! ps ...' test succeeds, and the loop breaks out
+    immediately instead of waiting for the sandboxed processes to exit.
+
+    3. TWO VARIABLES ASSIGNED ON ONE BRANCH, READ UNCONDITIONALLY
+    --------------------------------------------------------------
+
+    setup_sandbox is set only in the 'setup' arm, so 'start', 'remove' and 'list'
+    reached the test at the bottom of the file with it unset. sal_is_run_with_root
+    is set only when running as root, so a NON-root run aborted instead of printing
+    the script's own error.
+
+    Why the harness missed all three
+    ---------------------------------
+
+    Its bwrap stub accepted ANY arguments and exited 0, so a collapsed argument
+    string looked like success; bwrap_args was a SINGLE word in the fixture, so
+    quoting it produced one still-valid-looking argument; and 'start'/'remove' were
+    never run at all.
+
+    All three are now covered:
+
+    - the bwrap stub REJECTS any single argument containing a space, printing
+      BWRAP_REJECTED_MASHED_ARGUMENT;
+    - bwrap_args is MULTI-WORD in the fixture, passed as its own env assignment
+      rather than through the word-split spec string;
+    - 'start' and 'remove' are exercised.
+
+    Testing
+    -------
+
+    Gate exit 0 in an ISOLATED checkout.
+
+      10 same, 3 expected-differ, 0 UNEXPECTED
+
+    Canary: re-quoting both expansions exactly as the blanket sweep did gives
+    8 same, 3 expected-differ, 2 UNEXPECTED, with the stub reporting
+    BWRAP_REJECTED_MASHED_ARGUMENT.
+
+    One more defect was found and fixed along the way, by the hardened harness
+    rather than the review: the first attempt at fix 1 put the explanatory comment
+    BETWEEN two line-continuation lines, which ENDS the command -- bwrap was
+    truncated at the previous line and '--unshare-all' ran as a command of its own.
+    The comment now sits above the whole invocation.
+
+commit dee5dd44b5e420c5f5deaf0fda4e65e511ce3ba1
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Fri Aug 7 10:41:11 2026 -0400
+
+    sandbox-app-launcher: R-010 strict mode for the 4 scripts
+
+    Files: usr/bin/sandbox-app-launcher, usr/share/sandbox-app-launcher/
+    {autogen-seccomp,bwrap-wrapper,wrapper-script}.
+
+    This package BUILDS a bwrap confinement, so the interesting result is not the
+    lint cleanup but what strict mode does to the failure modes.
+
+    Fails closed now, and that is the point
+    ---------------------------------------
+
+    bwrap-wrapper receives app_path, app_user, app_homedir, seccomp_filter,
+    bwrap_args and the allow_* flags through the ENVIRONMENT of the
+    'sudo ... bwrap-wrapper' call sandbox-app-launcher makes.
+
+    With bwrap_args unset, the old script ran bwrap ANYWAY and exited 0, silently
+    dropping the caller's isolation arguments -- weaker confinement than intended,
+    with no indication. Under nounset it now refuses to start. With seccomp_filter
+    unset the old error was ': No such file or directory' from trying to open the
+    empty path; now the missing variable is named.
+
+    Regressions found and fixed, all caused by R-010 itself
+    -------------------------------------------------------
+
+    - 'list' exited 1 when NO sandboxes are configured. pipefail is new here, and
+      the grep in 'getent passwd | grep sal | ...' returns 1 when it matches
+      nothing; previously the pipeline's status was str_replace's. A normal empty
+      result is not an error.
+    - wrapper-script had NO strict mode at all. errexit made a missing dbus-launch
+      abort before the application was ever exec'd -- every sandboxed app would
+      have stopped launching on a system without it. Guarded, along with the two
+      loops that source THIRD-PARTY /etc/X11/Xsession.d files, which were never
+      written to run under errexit.
+    - 'case $1' in the option loop, and a 'shift 1' with no arguments left, which
+      shift_verbose turns into a reported failure. The shift is now guarded, which
+      also improves things: "no application name" used to be a SILENT exit 1 --
+      the failing shift aborted before any message -- and now reaches the app_name
+      validation that says what is wrong.
+    - '$sandbox_app_launcher_debug' read unconditionally at the top of both
+      wrappers. It is exported by the launcher, but the wrappers are reachable
+      on their own.
+
+    Also
+    ----
+
+    - style-ok: no-tmp-hardcode on bwrap-wrapper. Its '/tmp' paths are bwrap
+      ARGUMENTS naming paths inside the sandbox namespace: '--tmpfs /tmp' is what
+      gives the confined app a private /tmp, and the X11 socket must appear at
+      exactly /tmp/.X11-unix. Substituting ${TMP} would point them at the HOST's
+      directory and break the confinement this file exists to build.
+    - SC2124/SC2145: 'x="${a[@]}"' -> 'x="${a[*]}"' for the array-to-string joins,
+      and '${@}' -> '${*}' inside a message. Same output, correct spelling.
+    - SC2223: the unquoted ': ${app_path:=...}' default assignment was a globbing
+      hazard.
+    - 24 'echo' -> printf, including an 'echo -e' whose '\n' is emitted as its own
+      printf so the blank line survives.
+
+    Testing
+    -------
+
+    Gate exit 0 in an ISOLATED checkout.
+
+    New harness at ~/strict-pass-tests/sal-test/, run against real bubblewrap
+    0.11.0 in the sandbox with sudo and bwrap stubbed so the COMPOSED command line
+    is compared rather than executed.
+
+      8 same, 3 expected-differ, 0 UNEXPECTED
+
+    The three expected differences are ASSERTED, not merely tolerated: each states
+    the exit code and message the new behaviour must produce, so a regression in
+    them fails the run.
+
+    Canary: reverting just the 'list' pipefail guard and the dbus-launch guard
+    gives 6 same, 3 expected-differ, 2 UNEXPECTED -- both fixes are load-bearing.
+
+commit 758f7a4ff4803b13b20b4ff92b73282338768709
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Wed May 20 22:18:42 2026 +0000
+
+    bumped changelog version
+
 commit c323ce4e55f105108d33a1628d81a2d8c28f5105
 Author: Patrick Schleizer <adrelanos@whonix.org>
 Date:   Wed May 20 16:57:08 2026 -0400
